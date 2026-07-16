@@ -59,27 +59,126 @@ usa orgánicamente cuando la tarea lo amerita, o cuando se lo pedís. **Tiene su
 
 ---
 
-## 3. Skills — la biblioteca de recetas
+## 3. Skills — la biblioteca de recetas (traducidas)
 
-Una **skill** es una receta empaquetada para un tipo de tarea. Gentle-AI embebe **20 skills** en
-el binario y las inyecta en la config de tu agente. Se dividen en dos grupos:
+Una **skill** NO es documentación para humanos: es un **contrato de instrucciones para el LLM
+en runtime** (un `SKILL.md`). El agente las carga cuando la tarea matchea sus *triggers* y las
+sigue como reglas. Gentle-AI embebe estas skills en el binario y las inyecta en tu agente.
 
-### SDD (11 skills)
-`sdd-init`, `sdd-explore`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`, `sdd-apply`,
-`sdd-verify`, `sdd-archive`, `sdd-onboard`, y **`judgment-day`** (revisión adversarial con 2 jueces).
+Acá te traduzco **lo que dice cada `SKILL.md` tal cual**, agrupadas en dos: las de **fundación
+y colaboración** (a fondo) y las de **SDD** (breves, porque las fases están explicadas en el
+doc `02-SDD-PARA-DUMMIES.md`).
 
-### Foundation (9 skills)
-| Skill | Para qué |
-|-------|----------|
-| `go-testing` | Patrones de testing en Go (incluye TUI Bubbletea). |
-| `skill-creator` | Crear nuevas skills siguiendo el spec de Agent Skills. |
-| `branch-pr` | Workflow de PRs con conventional commits e issue-first. |
-| `issue-creation` | Filing de issues con templates de bug/feature. |
-| `skill-registry` | Arma el índice de skills instaladas (`.atl/skill-registry.md`). |
-| `chained-pr` | Planear PRs encadenados/apilados y revisables. |
-| `cognitive-doc-design` | Escribir docs que bajan la carga cognitiva de review/onboarding. |
-| `comment-writer` | Redactar comentarios de colaboración cálidos y directos. |
-| `work-unit-commits` | Partir la implementación en work units revisables. |
+### 3.A · Skills de fundación y colaboración
+
+#### `branch-pr` — abrir PRs con chequeo issue-first
+**Cuándo:** al crear, abrir o preparar un PR para review.
+**Qué dice:**
+- **Reglas críticas:** todo PR **debe** linkear un issue aprobado (sin excepciones); debe tener **exactamente un** label `type:*`; los checks automáticos deben pasar antes del merge; los PR en blanco sin issue los bloquea GitHub Actions.
+- **Flujo:** verificar que el issue tenga `status:approved` → crear rama `type/descripción` → implementar con conventional commits → correr shellcheck en scripts → abrir el PR con el template → poner un solo label `type:*` → esperar los checks.
+- **Nombre de rama:** regex `type/descripción`, minúsculas, sin espacios (ej.: `feat/user-login`, `fix/zsh-glob-error`).
+- **Cuerpo del PR:** issue linkeado (`Closes/Fixes/Resolves #N`), tipo (un solo checkbox + su label), resumen, tabla de cambios, plan de test, checklist.
+- **Conventional commits:** `type(scope): descripción`; mapeo commit→label (`feat`→`type:feature`, `fix`→`type:bug`, etc.).
+- **Checklist:** issue aprobado, un label `type:*`, shellcheck corrido, skills testeadas en al menos un agente, docs si cambió comportamiento, y **sin trailers `Co-Authored-By`**.
+
+#### `chained-pr` — partir PRs grandes en cadena
+**Cuándo:** PRs de más de **400 líneas**, PRs apilados, o cuando SDD marca riesgo de presupuesto alto.
+**Qué dice:**
+- **Reglas duras:** partir PRs de más de 400 líneas salvo `size:exception` explícito de un maintainer; cada PR revisable en **≤60 min**; **una unidad de trabajo por PR**, con sus tests y docs.
+- Cada PR de la cadena declara inicio, fin, dependencias previas, follow-ups y lo que queda fuera de scope; cada hijo lleva un diagrama de dependencias marcando el actual con `📍`.
+- **Estrategias:** *Stacked PRs* (rebanadas independientes que van a main) o *Feature Branch Chain* (con un PR tracker en draft/no-merge cuando la feature debe integrarse antes de main). No mezclar estrategias.
+- **Gates de decisión:** ≤400 y enfocado → un solo PR; >400 con rebanadas landables → stacked; >400 que debe integrarse junto → feature branch chain; diff generado/vendor imposible de partir → pedir `size:exception`.
+
+#### `work-unit-commits` — commitear por unidad de trabajo
+**Cuándo:** al implementar, partir commits, o mantener tests y docs con el código.
+**Qué dice:**
+- Un **work unit** es un comportamiento/fix/migración/docs entregable. **Commiteá por unidad, NO por tipo de archivo** (nada de "primero models, después services, después tests").
+- **Tests con el código** que verifican (mismo commit); **docs con el cambio** visible que explican.
+- Cada commit cuenta una historia: el reviewer entiende por qué existe desde su diff y mensaje. Cada commit debería poder ser un futuro PR encadenado.
+- **Checklist del work unit:** un propósito claro; el repo sigue teniendo sentido aplicando solo ese commit; tests/docs incluidos; rollback razonable; comando de test enfocado + resultado exacto; límite de rollback nombrado.
+- **Umbral de 400 líneas:** contar `additions + deletions` autorados; **excluir goldens generados** de ese conteo, pero **incluir todo archivo generado** en la identidad del snapshot y la validación del recibo.
+
+#### `cognitive-doc-design` — escribir docs que bajan la carga cognitiva
+**Cuándo:** guías, READMEs, RFCs, onboarding, arquitectura o docs para review.
+**Qué dice:**
+- **Patrones clave:** arrancar con la respuesta (decisión/acción primero, contexto después); *progressive disclosure* (happy path primero, detalles después); *chunking* (secciones chicas); señalización (títulos, labels, callouts, resúmenes); reconocimiento > memoria (tablas, checklists, ejemplos, templates); empatía con el reviewer (que pueda verificar la intención sin reconstruir toda la historia).
+- **Forma por defecto:** título orientado a resultado; un párrafo de "qué cambió, a quién ayuda, por qué importa"; `## Camino rápido` (pasos numerados); `## Detalles` (tabla Tema | Decisión); `## Checklist`; `## Próximo paso`.
+
+#### `comment-writer` — comentarios de colaboración cálidos y directos
+**Cuándo:** feedback de PR, respuestas a issues, reviews, mensajes de Slack o comentarios de GitHub.
+**Qué dice:**
+- **Reglas de voz:** ser útil rápido (arrancar por el punto accionable); cálido y directo (compañero pensante, no bot corporativo); corto (1-3 párrafos o bullets); explicar el porqué técnico al pedir un cambio; no pilonearse (comentá lo de más valor, no cada nimiedad).
+- **Idioma del contexto:** por defecto escribí en el idioma del hilo (thread en español → comentario en español). Para español, neutral/profesional salvo que el contexto pida tono regional.
+- **Sin em dashes.** Fórmula: `observación/pedido directo` → `por qué importa (si hace falta)` → `próxima acción concreta`.
+
+#### `go-testing` — patrones de testing en Go
+**Cuándo:** tests de Go, coverage, TUI Bubbletea, `teatest`, golden files.
+**Qué dice:**
+- **Reglas duras:** preferir tests *table-driven* con `t.Run(tt.name, ...)`; testear comportamiento y transiciones de estado, no trivias de implementación; usar `t.TempDir()` (nunca el home real).
+- Tests de integración *skippables* con `testing.Short()`; para Bubbletea, testear `Model.Update()` directo (y `teatest` solo para flujos interactivos).
+- Golden files **deterministas**, actualizados solo por el path `-update` y re-corridos sin `-update`.
+- **Gates:** función pura → unit table-driven; error → casos éxito y fallo explícitos; archivos → `t.TempDir()`; transición TUI → `Model.Update()`; render → golden; comando externo real → integración skippeada en `-short`.
+
+#### `issue-creation` — crear issues con triage
+**Cuándo:** crear issues, bug reports o feature requests.
+**Qué dice:**
+- **Reglas críticas:** los issues en blanco están deshabilitados (hay que usar template); todo issue nace con `status:needs-review`; un maintainer **debe** poner `status:approved` antes de que se pueda abrir un PR; las preguntas van a Discussions, no a issues.
+- **Flujo:** buscar duplicados → elegir template (Bug/Feature) → completar campos → submit (auto `needs-review`) → esperar `approved` → recién ahí abrir el PR.
+- Templates con auto-labels (`bug`/`enhancement` + `status:needs-review`) y campos requeridos (SO, agente, shell, pasos, etc.).
+
+#### `judgment-day` — review adversarial de dos jueces
+**Cuándo:** solo cuando pedís explícitamente "judgment day" / review dual/adversarial de un target concreto. **Reemplaza** al 4R ordinario para ese target (nunca los dos juntos).
+**Qué dice:**
+- **Protocolo de dos jueces:** un target inmutable, y **dos jueces ciegos read-only en paralelo** con el mismo scope. Cada uno devuelve un resultado neutral y termina. Se esperan los dos; nunca un juicio parcial. **Nunca se lanza `review-refuter`** — el acuerdo entre jueces ES el mecanismo de corroboración.
+- **Solo el orquestador** mergea findings, lanza el fix actor y la re-judgment. Se arregla solo lo **severo confirmado por AMBOS** jueces (WARNING/SUGGESTION quedan `info`).
+- **Máximo dos rondas** de fix y dos re-judgments. Estados terminales: solo `approved | escalated`.
+- Si los jueces se contradicen → escala a decisión humana; si uno solo lo reporta → se marca sospechoso, no se auto-arregla.
+
+#### `skill-creator` — crear nuevas skills
+**Cuándo:** cuando un patrón se repite y la IA necesita guía; NO para algo trivial o de una sola vez.
+**Qué dice:**
+- Una skill es un **contrato de instrucciones para el LLM**, no doc humana. Seguir `docs/skill-style-guide.md` como fuente normativa.
+- **Sin sección `Keywords`** (los triggers van en `description`). Cuerpo conciso: **objetivo 180–450 tokens, máx recomendado 700, máx duro 1000**.
+- **Estructura:** `skills/{nombre}/SKILL.md` + `assets/` (templates/schemas) + `references/` (links locales) opcionales.
+- **Frontmatter:** `name`, `description: "Trigger: {palabras}. {qué hace}."`, `license`, `metadata.author`, `metadata.version`. Orden de secciones: Activation, Hard Rules, Decision Gates, Execution Steps, Output Contract, References.
+
+#### `skill-improver` — auditar y mejorar skills existentes
+**Cuándo:** auditar/refactorizar/normalizar `SKILL.md` existentes (para una nueva, usar `skill-creator`).
+**Qué dice:**
+- Tratar el `SKILL.md` como fuente de verdad y **preservar la intención del autor**, las reglas críticas y los triggers.
+- **Por defecto solo audita** — modifica archivos solo si se lo pedís explícitamente. Nunca borra contenido con sentido en silencio; mueve lo largo a `references/`/`assets/`.
+- No inventa triggers ni reglas; marca lo ambiguo para revisión humana. Devuelve un reporte de auditoría por skill con severidad y cambios propuestos exactos.
+
+#### `skill-registry` — indexar las skills instaladas
+**Cuándo:** después de instalar/quitar/crear/mover skills, o cuando un orquestador necesita un índice fresco.
+**Qué dice:**
+- El registro es un **índice, no un resumen ni un compilador** — el `SKILL.md` sigue siendo la fuente de verdad. Escribe siempre `.atl/skill-registry.md` (y a Engram con `topic_key: skill-registry`, `capture_prompt: false`).
+- **Saltea `sdd-*`, `_shared` y `skill-registry`**; deduplica por nombre prefiriendo las skills del proyecto sobre las globales. Si no hay skills, escribe un registro vacío para que los agentes dejen de buscar a ciegas.
+
+#### `hermes-ephemeral-delegation` — delegar en workers efímeros (Hermes)
+**Cuándo:** siendo orquestador padre, cuando el trabajo es exploración amplia (4+ archivos), implementación multi-archivo, tests/builds, review adversarial fresco, o debug multi-paso.
+**Qué dice:**
+- Usar `delegate_task` para todo ese trabajo complejo — **no ejecutar inline**. Los workers son **efímeros** (contexto fresco cada vez, sin memoria del padre).
+- Pasar una **misión autocontenida** (objetivo exacto, rutas, contexto previo, constraints, evidencia esperada). Tratar el output del worker como auto-reporte: **verificar** (archivos escritos, tests, URLs) antes de reportar éxito.
+- Batch en paralelo solo para workstreams **independientes**; las dependencias secuenciales van en secuencia.
+
+### 3.B · Skills de SDD (breves — ver `02-SDD-PARA-DUMMIES.md`)
+
+Rasgos compartidos: todas tienen `disable-model-invocation: true`, `delegate_only: true` (salvo
+`sdd-onboard`), y abren con un **ORCHESTRATOR GATE** (si sos el orquestador, delegá) + un
+**Executor Override** (si sos el sub-agente, ejecutá). Contrato de idioma: los artefactos técnicos
+van en inglés por defecto. Tamaños acotados por fase.
+
+- **`sdd-init`** — detecta stack, convenciones, tooling de test y persistencia; resuelve Strict TDD (marcador/config, o `true` si hay test runner); arma `.atl/skill-registry.md`.
+- **`sdd-explore`** — investiga el código, compara enfoques, recomienda; solo lee, nunca modifica; devuelve estado actual, áreas afectadas, enfoques (pros/cons), recomendación y riesgos.
+- **`sdd-propose`** — ronda de 3-5 preguntas de producto (no de mecánica); `proposal.md` con Intent, Scope, **Capabilities** (contrato con spec), Approach, Risks, Rollback, Success Criteria. **<450 palabras.**
+- **`sdd-spec`** — requisitos con **Given/When/Then** y palabras **RFC 2119** (MUST/SHOULD...); MODIFIED debe copiar el bloque completo antes de editar; specs describen el QUÉ, no el CÓMO. **<650 palabras.**
+- **`sdd-design`** — enfoque técnico, decisiones con rationale, flujo de datos, cambios de archivos, matriz de amenazas (si toca routing/shell/procesos). **<800 palabras.**
+- **`sdd-tasks`** — tareas accionables numeradas + **Review Workload Forecast** (guarda del presupuesto de 400 líneas, estrategia de chained-PR). **<530 palabras.**
+- **`sdd-apply`** — implementa siguiendo specs/design; **gate de Strict-TDD** (evidencia RED→GREEN→REFACTOR) + **Work Unit Evidence**; marca tareas `[x]`; no lanza review.
+- **`sdd-verify`** — puerta de calidad: corre tests y mapea cada escenario de spec a un test que pasó; resultado `PASS`/`PASS WITH WARNINGS`/`FAIL`; no arregla, reporta.
+- **`sdd-archive`** — fusiona specs delta en la fuente de verdad y mueve la carpeta a `archive/`; **exige `reviewGate.result: allow`** y tareas completas.
+- **`sdd-onboard`** — walkthrough interactivo del ciclo completo sobre tu código real (corre inline).
 
 > Las skills **framework-específicas** (React 19, Angular, TypeScript, Tailwind 4, Zod, Playwright...)
 > viven en un repo aparte, [Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills),

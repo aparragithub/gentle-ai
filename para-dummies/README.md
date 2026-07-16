@@ -39,6 +39,10 @@ diagramas mermaid) y en **`.pdf`** (con los diagramas ya renderizados).
 10. **[10-ENGRAM-CLOUD-PARA-DUMMIES](10-ENGRAM-CLOUD-PARA-DUMMIES.md)** — Engram Cloud: qué es y **guía de
     puesta en marcha en la empresa** (deploy GHCR, secrets, usuarios gestionados, autosync, troubleshooting).
     Pareja de [04-ENGRAM](04-ENGRAM-PARA-DUMMIES.md).
+11. **[11-CODEGRAPH-PARA-DUMMIES](11-CODEGRAPH-PARA-DUMMIES.md)** — CodeGraph (**para todos los agentes**, no solo Pi):
+    qué es, en qué ayuda, cómo lo integra y cablea Gentle-AI por agente, y cómo se usa.
+99. **[99-OPERACIONES-CLI-PARA-DUMMIES](99-OPERACIONES-CLI-PARA-DUMMIES.md)** — La referencia operativa del CLI:
+    install, sync, update/upgrade, backup/restore/rollback, uninstall, doctor.
 
 ## El mapa mental en una línea
 

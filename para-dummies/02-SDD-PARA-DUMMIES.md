@@ -84,6 +84,66 @@ y un **Executor Override** (si sos el sub-agente, ejecutá).
 - **sdd-continue `[cambio]`** — corre la próxima fase lista según las dependencias.
 - **sdd-status `[cambio]`** — estado estructurado, solo lectura, nunca lanza ejecutores.
 
+### El detalle: qué dice el `SKILL.md` de cada fase (traducido)
+
+Rasgos compartidos: todas las fases tienen `disable-model-invocation: true` y `delegate_only: true`
+(salvo `sdd-onboard`), abren con el **ORCHESTRATOR GATE** + **Executor Override**, y un **Contrato
+de idioma**: los artefactos técnicos generados van en inglés por defecto (no heredan el idioma de
+la conversación ni la voz regional de la persona salvo pedido explícito). Persistencia:
+`engram | openspec | hybrid | none`.
+
+#### `sdd-init` — inicializar el contexto (v3.0)
+- **Detectar el stack real** — convenciones, arquitectura, tooling de test y modo de persistencia. **Nunca adivinar.**
+- **Resolver Strict TDD:** marcador/config explícito si existe; si no hay pero hay test runner → `strict_tdd: true`; sin runner → `false`.
+- **Persistir siempre** las capacidades de test (`sdd/{project}/testing-capabilities` o `config.yaml testing:`) y armar `.atl/skill-registry.md` (también a Engram si está).
+- Si `openspec/` ya existe, **reportar y preguntar** antes de actualizar.
+
+#### `sdd-explore` — investigar antes de comprometerse (v2.0)
+- Investiga el código, compara enfoques y devuelve un análisis estructurado. Por defecto **solo investiga y reporta**; crea `exploration.md` solo si está atado a un cambio con nombre.
+- **Lee código real, nunca adivina; nunca modifica** archivos.
+- Formato fijo: Estado actual · Áreas afectadas · Enfoques (pros/cons/esfuerzo) · Recomendación · Riesgos · "Listo para propuesta" Sí/No.
+
+#### `sdd-propose` — la propuesta (v2.0)
+- En modo interactivo, ronda de **3-5 preguntas de PRODUCTO** (problema de negocio, usuarios, reglas, resultado esperado, gap del estado actual, edge cases, límites de scope, riesgo) — **no** de mecánica del harness.
+- `proposal.md`: Intent · Scope (In/Out) · **Capabilities** (New/Modified — el contrato con `sdd-spec`, en kebab-case; escribir "None" explícito si nada cambia a nivel spec) · Approach · Affected Areas · Risks · Rollback Plan · Dependencies · Success Criteria.
+- **Rollback y success criteria son obligatorios.** Investigar `openspec/specs/` primero para nombrar bien las Capabilities. **Tamaño: <450 palabras.**
+
+#### `sdd-spec` — las especificaciones (v2.0)
+- Leer la sección **Capabilities** de la propuesta como contrato primario: New → spec completo; Modified → spec **delta**.
+- Escenarios **Given/When/Then** + palabras **RFC 2119** (MUST/SHALL/SHOULD/MAY); cada requisito con al menos un escenario (happy path + edge cases); testeable; describe el **QUÉ, no el CÓMO**.
+- **MODIFIED debe ser el bloque COMPLETO:** copiar el requisito entero + todos sus escenarios y después editar, o el archive pierde contenido. REMOVED lleva Razón (+Migración); RENAMED nombra el viejo y el nuevo. **Tamaño: <650 palabras.**
+
+#### `sdd-design` — el diseño técnico (v2.0)
+- **Leer el código afectado antes de diseñar** — nunca adivinar; usar los patrones reales del proyecto.
+- `design.md`: Enfoque técnico · Decisiones de arquitectura (Elección / Alternativas / Rationale) · Flujo de datos · Tabla de cambios de archivos · Interfaces · Estrategia de tests · Matriz de amenazas · Migración · Preguntas abiertas. **Toda decisión con su rationale.**
+- **Matriz de amenazas aplicable:** si el diseño toca routing, shell, subprocesos, VCS/PR, clasificación de ejecutables o integración de procesos → incluir `references/threat-matrix.md`; cada fila Aplicable o N/A explícito; las aplicables se vuelven requisitos que propagan a tasks y a tests RED. **Tamaño: <800 palabras.**
+
+#### `sdd-tasks` — el desglose en tareas (v2.0)
+- `tasks.md` con tareas por fases, **Específicas/Accionables/Verificables/Chicas**, numeración jerárquica (1.1, 1.2...), con rutas de archivo concretas. Nada vago ("implementar la feature").
+- **Review Workload Forecast** arriba, con líneas exactas: `Decision needed before apply: Yes|No`, `Chained PRs recommended: Yes|No`, `Chain strategy: stacked-to-main|feature-branch-chain|size-exception|pending`, `400-line budget risk: Low|Medium|High`.
+- Si probablemente supera el presupuesto de 400 líneas, partir en work units y **preguntar la estrategia de cadena**. Cada caso aplicable de la matriz de amenazas → una tarea de **test RED** antes de la de producción. **Tamaño: <530 palabras.**
+
+#### `sdd-apply` — la implementación (v3.0)
+- Leer specs (criterios de aceptación) y design **antes** de codear; seguir los patrones existentes; **nunca implementar tareas no asignadas**; anotar desvíos en vez de improvisar en silencio.
+- **Hacer valer la decisión de workload** antes de implementar: si el forecast dice High / Chained / Decision needed, confirmar el path resuelto (auto-chain, exception-ok o single-pr con `size:exception` registrada); si no, **STOP** con `blocked: workload-decision-required`.
+- **Gate de Strict TDD:** si está activo, producir evidencia **RED→GREEN→REFACTOR** (sin fallback silencioso). **Todos los modos** exigen una tabla de **Work Unit Evidence** (comando de test + resultado, runtime harness o N/A, límite de rollback) antes de marcar completa una unidad.
+- Marca `[x]` en el artefacto persistido a medida que avanza; re-lee y **mergea** apply-progress previo; devuelve el control al padre (el ejecutor **nunca** lanza 4R / Judgment Day / refuter / corrección).
+
+#### `sdd-verify` — la puerta de calidad (v3.0)
+- Probar con inspección de fuente **MÁS evidencia de ejecución real** — el análisis estático solo **nunca** es verificación; un escenario cumple **solo** cuando un test que lo cubre pasó en runtime.
+- Correr solo con **todas** las tareas completas; cualquier tarea sin marcar bloquea (siempre CRITICAL). Comparar specs primero, design segundo, tareas tercero. **No arregla — reporta.**
+- Comando con exit no-cero → CRITICAL; escenario sin test que pase → CRITICAL. Salida: `## Verification Report` con matriz de cumplimiento + veredicto `PASS` / `PASS WITH WARNINGS` / `FAIL`; registra comandos, exit codes y hashes. Es la verificación final independiente (una contradicción escala, no abre otro loop de review).
+
+#### `sdd-archive` — cerrar el ciclo (v2.0)
+- Fusionar las specs **delta** en las specs principales (fuente de verdad) y mover la carpeta a `openspec/changes/archive/AAAA-MM-DD-{cambio}/`. El archive es **auditoría** — nunca borrar/modificar lo archivado.
+- **Gate de recibo de review:** exige status con `reviewGate.result: allow` + recibo terminal matcheante antes de fusionar o mover. Missing/pending/malformed/scope-changed/invalidated/escalated **bloquea, sin override**.
+- **Gate de tareas:** cualquier tarea sin marcar bloquea. Los issues **CRITICAL** de verify siempre bloquean. Al fusionar, **preservar** los requisitos no mencionados en el delta.
+
+#### `sdd-onboard` — el walkthrough guiado (v1.0, corre inline)
+- Guía al usuario por un ciclo SDD **completo sobre su código real** — un cambio real con artefactos reales (enseñar haciendo), no un juguete.
+- 10 fases narradas: Bienvenida/Análisis (buscar un cambio chico, de bajo riesgo y con valor real; ofrecer 2-3 opciones) → Explore → Propose → Specs → Design → Tasks → Apply → Verify → Archive → Resumen.
+- Narración corta por fase (1-3 oraciones); **siempre preguntar** antes de seguir después de la propuesta; frenar y explicar si algo bloquea.
+
 ---
 
 ## 3. Dónde vive todo en el disco (OpenSpec)

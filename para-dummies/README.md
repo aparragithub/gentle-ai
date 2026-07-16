@@ -22,9 +22,6 @@ diagramas mermaid) y en **`.pdf`** (con los diagramas ya renderizados).
    los conceptos (observaciones/sesiones/prompts), las tools MCP y cómo compartir por git.
 5. **[05-COMPONENTS-PARA-DUMMIES](05-COMPONENTS-PARA-DUMMIES.md)** — Qué hace cada componente (engram, sdd,
    skills, persona, context7, permissions, gga, theme) y la persona Gentleman/Neutral **traducida tal cual**.
-10. **[10-ENGRAM-CLOUD-PARA-DUMMIES](10-ENGRAM-CLOUD-PARA-DUMMIES.md)** — Engram Cloud: qué es y **guía de
-    puesta en marcha en la empresa** (deploy GHCR, secrets, usuarios gestionados, autosync, troubleshooting).
-    Pareja de [04-ENGRAM](04-ENGRAM-PARA-DUMMIES.md).
 
 ## Por agente — cómo se integra con cada TUI
 
@@ -36,6 +33,12 @@ diagramas mermaid) y en **`.pdf`** (con los diagramas ya renderizados).
    CodeGraph, y el handoff a gentle-pi.
 9. **[09-GENTLE-PI-PARA-DUMMIES](09-GENTLE-PI-PARA-DUMMIES.md)** — El tercero `gentle-pi` por dentro: su
    runtime de review nativo, el binario Go verificado, y su relación con Gentle-AI.
+
+## Avanzado / operaciones
+
+10. **[10-ENGRAM-CLOUD-PARA-DUMMIES](10-ENGRAM-CLOUD-PARA-DUMMIES.md)** — Engram Cloud: qué es y **guía de
+    puesta en marcha en la empresa** (deploy GHCR, secrets, usuarios gestionados, autosync, troubleshooting).
+    Pareja de [04-ENGRAM](04-ENGRAM-PARA-DUMMIES.md).
 
 ## El mapa mental en una línea
 

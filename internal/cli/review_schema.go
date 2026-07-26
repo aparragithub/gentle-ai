@@ -1,23 +1,37 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const reviewReviewerSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://gentle-ai.dev/schema/review/reviewer/v1","title":"Gentle AI reviewer result","type":"object","additionalProperties":false,"required":["subject_hash","inspection","findings","evidence"],"properties":{"subject_hash":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"inspection":{"type":"object","additionalProperties":false,"required":["status","paths"],"properties":{"status":{"const":"completed"},"paths":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}}}},"lens":{"type":"string","enum":["risk","resilience","readability","reliability","review-risk","review-resilience","review-readability","review-reliability"]},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["location","severity","claim","proof_refs"],"allOf":[{"if":{"properties":{"severity":{"enum":["BLOCKER","CRITICAL"]}},"required":["severity"]},"then":{"required":["evidence_class","causal_disposition"]}}],"properties":{"id":{"type":"string","pattern":"^R[1-4]-[A-Za-z0-9][A-Za-z0-9._-]*$"},"lens":{"type":"string","enum":["risk","resilience","readability","reliability"]},"location":{"type":"string","minLength":1},"severity":{"type":"string","enum":["BLOCKER","CRITICAL","WARNING","SUGGESTION"]},"claim":{"type":"string","minLength":1},"proof_refs":{"type":"array","minItems":1,"items":{"type":"string","pattern":"\\S","not":{"pattern":"^\\s*(?:[nN]/[aA]|[nN][aA]|[nN][oO][nN][eE]|[tT][oO][dD][oO]|[tT][bB][dD]|[pP][aA][sS][sS]|[pP][aA][sS][sS][eE][dD]|[sS][uU][cC][cC][eE][sS][sS]|[pP][lL][aA][cC][eE][hH][oO][lL][dD][eE][rR])\\s*$"}}},"evidence_class":{"type":"string","enum":["deterministic","inferential","insufficient"]},"causal_disposition":{"type":"string","enum":["introduced","behavior-activated","worsened","pre-existing","base-only","unknown"]}}}},"evidence":{"type":"array","minItems":1,"items":{"type":"string","pattern":"\\S","not":{"pattern":"^\\s*(?:[nN]/[aA]|[nN][aA]|[nN][oO][nN][eE]|[tT][oO][dD][oO]|[tT][bB][dD]|[pP][aA][sS][sS]|[pP][aA][sS][sS][eE][dD]|[sS][uU][cC][cC][eE][sS][sS]|[pP][lL][aA][cC][eE][hH][oO][lL][dD][eE][rR])\\s*$"}}}},"examples":[{"subject_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","inspection":{"status":"completed","paths":["internal/example.go"]},"findings":[],"evidence":["reviewed the complete candidate scope"]}]}`
 
-// reviewVerificationEvidenceSchema describes the input review capture-evidence
-// actually accepts and readCapturedFinalEvidence actually enforces: raw,
-// non-empty final test/verification evidence content, not a structured JSON
-// object, bounded by the same native artifact limit every captured artifact
-// uses (reviewResultArtifactLimit).
-var reviewVerificationEvidenceSchema = fmt.Sprintf(
-	`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://gentle-ai.dev/schema/review/verification-evidence/v1","title":"Gentle AI captured final verification evidence","description":"Raw final test or verification evidence content captured by review capture-evidence. It is not a structured JSON document: any non-empty content up to the native artifact bound is accepted.","type":"string","minLength":1,"maxLength":%d}`,
-	reviewResultArtifactLimit,
+const (
+	reviewVerificationEvidenceSchemaName = "gentle-ai.review-verification-evidence/v1"
+	reviewVerificationEvidenceSchemaID   = "https://gentle-ai.dev/contracts/review-integration/v1/schemas/verification-evidence.schema.json"
+	reviewVerificationPassed             = "passed"
+	reviewVerificationFailed             = "failed"
 )
+
+const reviewVerificationEvidenceSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://gentle-ai.dev/contracts/review-integration/v1/schemas/verification-evidence.schema.json","title":"Gentle AI final verification evidence","type":"object","additionalProperties":false,"required":["schema","outcome","checks"],"properties":{"schema":{"const":"gentle-ai.review-verification-evidence/v1"},"outcome":{"enum":["passed","failed"]},"checks":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["name","status","evidence"],"properties":{"name":{"type":"string","pattern":"\\S"},"status":{"enum":["passed","failed"]},"command":{"type":"string","pattern":"\\S"},"evidence":{"type":"array","minItems":1,"items":{"type":"string","pattern":"\\S"}}}}}},"examples":[{"schema":"gentle-ai.review-verification-evidence/v1","outcome":"passed","checks":[{"name":"focused tests","status":"passed","command":"go test ./internal/cli","evidence":["ok github.com/gentleman-programming/gentle-ai/internal/cli"]}]}]}`
+
+type reviewVerificationEvidence struct {
+	Schema  string                    `json:"schema"`
+	Outcome string                    `json:"outcome"`
+	Checks  []reviewVerificationCheck `json:"checks"`
+}
+
+type reviewVerificationCheck struct {
+	Name     string   `json:"name"`
+	Status   string   `json:"status"`
+	Command  string   `json:"command,omitempty"`
+	Evidence []string `json:"evidence"`
+}
 
 var reviewInputSchemas = map[string]json.RawMessage{
 	"reviewer":                    json.RawMessage(reviewReviewerSchema),
@@ -40,4 +54,43 @@ func RunReviewSchema(args []string, stdout io.Writer) error {
 		return err
 	}
 	return encodeReviewJSON(stdout, value)
+}
+
+func parseReviewVerificationEvidence(payload []byte) (reviewVerificationEvidence, []byte, error) {
+	var evidence reviewVerificationEvidence
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&evidence); err != nil {
+		return evidence, nil, fmt.Errorf("decode final verification evidence: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return evidence, nil, errors.New("decode final verification evidence: trailing data")
+	}
+	if evidence.Schema != reviewVerificationEvidenceSchemaName || (evidence.Outcome != reviewVerificationPassed && evidence.Outcome != reviewVerificationFailed) || len(evidence.Checks) == 0 {
+		return evidence, nil, errors.New("invalid final verification evidence identity, outcome, or checks")
+	}
+	failed := false
+	for index, check := range evidence.Checks {
+		if strings.TrimSpace(check.Name) == "" || strings.TrimSpace(check.Name) != check.Name ||
+			(check.Status != reviewVerificationPassed && check.Status != reviewVerificationFailed) || len(check.Evidence) == 0 {
+			return evidence, nil, fmt.Errorf("invalid final verification check %d", index+1)
+		}
+		if check.Command != "" && (strings.TrimSpace(check.Command) == "" || strings.TrimSpace(check.Command) != check.Command) {
+			return evidence, nil, fmt.Errorf("invalid final verification check %d command", index+1)
+		}
+		for _, proof := range check.Evidence {
+			if strings.TrimSpace(proof) == "" {
+				return evidence, nil, fmt.Errorf("invalid final verification check %d evidence", index+1)
+			}
+		}
+		failed = failed || check.Status == reviewVerificationFailed
+	}
+	if (evidence.Outcome == reviewVerificationFailed) != failed {
+		return evidence, nil, errors.New("final verification outcome does not match check statuses")
+	}
+	canonical, err := json.Marshal(evidence)
+	if err != nil {
+		return evidence, nil, err
+	}
+	return evidence, append(canonical, '\n'), nil
 }

@@ -159,6 +159,12 @@ type ReviewFacadeReceiptPublicationError struct {
 	Cause           error  `json:"-"`
 }
 
+type staleCapturedResultsError struct{}
+
+func (*staleCapturedResultsError) Error() string {
+	return "captured reviewer results are accepted only while reviewing; query review.status --next-transition for the current native transition"
+}
+
 func (err *ReviewFacadeReceiptPublicationError) Error() string {
 	return fmt.Sprintf(
 		"write compact review receipt: %v (mutation_outcome: %s, replayability: %s, lineage: %s, request_digest: %s)",
@@ -1433,12 +1439,15 @@ func runReviewFacadeFinalize(ctx context.Context, args []string, stdout io.Write
 	if terminalAtEntry && !facadeFinalizeReplayInputsEmpty(resultPaths, resultArtifacts, resultArtifactFiles, *capturedResults, *capturedEvidence, *validationPath, *refuterPath, *evidencePath, *correctionLines, *failed, *tracePath) {
 		return errors.New("terminal review finalize accepts no review inputs; exact replay requires only --lineage")
 	}
-	if state.State != reviewtransaction.StateReviewing && (len(resultArtifacts) != 0 || len(resultArtifactFiles) != 0 || len(resultPaths) != 0) {
+	if state.State != reviewtransaction.StateReviewing && (len(resultArtifacts) != 0 || len(resultArtifactFiles) != 0 || len(resultPaths) != 0 || *capturedResults) {
 		pending, pendingErr := store.PendingFinalizeAttempt()
 		if pendingErr != nil {
 			return pendingErr
 		}
 		if terminalAtEntry || pending == nil {
+			if *capturedResults {
+				return reviewPreflightError(&staleCapturedResultsError{})
+			}
 			return reviewPreflightError(errors.New("reviewer results are accepted only while the authority is reviewing"))
 		}
 	}
@@ -1519,6 +1528,7 @@ func runReviewFacadeFinalize(ctx context.Context, args []string, stdout io.Write
 		}
 	}
 	var evidence []byte
+	verificationFailed := *failed
 	if strings.TrimSpace(*evidencePath) != "" {
 		evidence, err = readFacadeBytes(*evidencePath)
 		if err != nil {
@@ -1536,9 +1546,19 @@ func runReviewFacadeFinalize(ctx context.Context, args []string, stdout io.Write
 	// capture-evidence` call already bound to this exact authority. Consume it
 	// on the identical bytes path --captured-evidence uses, so the request is
 	// a real transition instead of a no-op (1663).
-	if len(evidence) == 0 && !*capturedEvidence && state.State == reviewtransaction.StateValidating {
-		if captured, captureErr := readCapturedFinalEvidence(store.Dir, state, record.Revision); captureErr == nil {
-			evidence = captured
+	if state.State == reviewtransaction.StateValidating && len(evidence) == 0 {
+		var found bool
+		evidence, found, err = discoverCapturedFinalEvidence(store.Dir)
+		if err != nil {
+			return reviewPreflightError(err)
+		}
+		if !found {
+			evidence = nil
+		}
+	}
+	if len(evidence) > 0 {
+		if captured, _, parseErr := parseReviewVerificationEvidence(evidence); parseErr == nil {
+			verificationFailed = captured.Outcome == reviewVerificationFailed
 		}
 	}
 	if terminalComplete {
@@ -1563,7 +1583,7 @@ func runReviewFacadeFinalize(ctx context.Context, args []string, stdout io.Write
 					return reviewPreflightError(err)
 				}
 			}
-			replayRequest := facadeFinalizeAttemptRequestForCandidate(record, state.CurrentSnapshot, reviewerResults, validation, refuter, replayEvidence, *correctionLines, *failed)
+			replayRequest := facadeFinalizeAttemptRequestForCandidate(record, state.CurrentSnapshot, reviewerResults, validation, refuter, replayEvidence, *correctionLines, verificationFailed)
 			attempt, attemptLoaded, err = store.ReconcileFinalizeAttempt(ctx, replayRequest)
 			if err != nil {
 				return err
@@ -1582,7 +1602,7 @@ func runReviewFacadeFinalize(ctx context.Context, args []string, stdout io.Write
 			return reviewPreflightError(fmt.Errorf("validate FINALIZE current snapshot: %v", err))
 		}
 	}
-	plan, err := prepareFacadeFinalizePlan(ctx, root, record.Revision, state, reviewerResults, refuter, validation, evidence, *correctionLines, *failed)
+	plan, err := prepareFacadeFinalizePlan(ctx, root, record.Revision, state, reviewerResults, refuter, validation, evidence, *correctionLines, verificationFailed)
 	if err != nil {
 		return reviewPreflightError(err)
 	}
@@ -1606,7 +1626,7 @@ func runReviewFacadeFinalize(ctx context.Context, args []string, stdout io.Write
 		}
 		return encodeCompactFacadeFinalize(stdout, negotiated, *actionEligibility, *nextTransition, state, record.Revision, store, "continue the current review state", reviewFinalizeOutputContext{Context: ctx, Repo: root})
 	}
-	request := facadeFinalizeAttemptRequestForCandidate(record, plan.Candidate, reviewerResults, validation, refuter, plan.Evidence, *correctionLines, *failed)
+	request := facadeFinalizeAttemptRequestForCandidate(record, plan.Candidate, reviewerResults, validation, refuter, plan.Evidence, *correctionLines, verificationFailed)
 	if !terminalAtEntry && pendingAtEntry != nil && !attemptLoaded {
 		attempt, attemptLoaded, err = store.ReconcileFinalizeAttempt(ctx, request)
 		if err != nil {
@@ -2410,6 +2430,20 @@ func (result facadeReviewerResult) nativeLensResult() reviewtransaction.LensResu
 		}
 	}
 	return reviewtransaction.LensResult{Lens: result.Lens, Findings: findings, Evidence: result.Evidence}
+}
+
+func (result facadeReviewerResult) withCanonicalLensResult(canonical reviewtransaction.LensResult) facadeReviewerResult {
+	result.Lens = canonical.Lens
+	result.Findings = make([]facadeFinding, len(canonical.Findings))
+	for index, finding := range canonical.Findings {
+		result.Findings[index] = facadeFinding{
+			ID: finding.ID, Lens: finding.Lens, Location: finding.Location, Severity: finding.Severity,
+			Claim: finding.Claim, ProofRefs: append([]string(nil), finding.ProofRefs...),
+			EvidenceClass: finding.EvidenceClass, CausalDisposition: finding.CausalDisposition,
+		}
+	}
+	result.Evidence = append([]string(nil), canonical.Evidence...)
+	return result
 }
 
 func (result facadeValidationResult) native(tx reviewtransaction.Transaction) (reviewtransaction.ScopedValidationResult, error) {

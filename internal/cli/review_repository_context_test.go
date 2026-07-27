@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -83,7 +85,28 @@ func TestRepositoryContextCaptureFromUnrelatedCWDProducesFinalizeArtifact(t *tes
 		t.Fatal("repository-context preserve accepted an explicit cwd")
 	}
 
-	args := append(append([]string{}, bindingArgs...), "--input", resultPath)
+	// The opaque incident reference is itself a provider-owned replay input. The
+	// native capture path resolves its preserved bytes and applies the same strict
+	// admission checks without rerunning the reviewer.
+	args := append(append([]string{}, bindingArgs...), "--input", incident.Reference)
+	staleRevision := append([]string{}, args...)
+	for index, argument := range staleRevision {
+		if argument == "--expected-revision" {
+			staleRevision[index+1] = "sha256:" + strings.Repeat("f", 64)
+		}
+	}
+	if err := RunReviewCaptureResult(staleRevision, io.Discard); err == nil {
+		t.Fatal("capture-result accepted a stale authority revision for preserved replay")
+	}
+	mismatched := append([]string{}, args...)
+	replacement := "0"
+	if strings.HasSuffix(incident.Reference, replacement) {
+		replacement = "1"
+	}
+	mismatched[len(mismatched)-1] = incident.Reference[:len(incident.Reference)-1] + replacement
+	if err := RunReviewCaptureResult(mismatched, io.Discard); err == nil {
+		t.Fatal("capture-result accepted a mismatched preserved-result reference")
+	}
 	var captured bytes.Buffer
 	if err := RunReviewCaptureResult(args, &captured); err != nil {
 		t.Fatal(err)
@@ -118,6 +141,141 @@ func TestRepositoryContextCaptureFromUnrelatedCWDProducesFinalizeArtifact(t *tes
 	}
 	if err := RunReviewCaptureResult(missingRevision, io.Discard); err == nil {
 		t.Fatal("repository-context capture accepted a missing revision")
+	}
+}
+
+func TestResolveReviewIncidentReferenceRejectsUnsafeReplaySources(t *testing.T) {
+	repo, started, _, record := newArtifactReview(t, false)
+	payload := admittedReviewerPayloadForTest(t, repo, record, record.State.SelectedLenses[0], 0)
+	dir, err := reviewtransaction.CompactIncidentsDir(context.Background(), repo, started.LineageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserve := func(t *testing.T) reviewIncidentArtifact {
+		t.Helper()
+		artifact, err := preserveIncidentArtifact(dir, started.LineageID, record.State.InitialSnapshot.Identity, record.State.SelectedLenses[0], 0, payload, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact.Reference = reviewIncidentReference(artifact)
+		return artifact
+	}
+	resolve := func(artifact reviewIncidentArtifact, target string) error {
+		_, err := resolveReviewIncidentReference(context.Background(), repo, artifact.Reference, started.LineageID, target, record.State.SelectedLenses[0], 0)
+		return err
+	}
+
+	t.Run("unsafe file mode", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("POSIX mode fixture")
+		}
+		artifact := preserve(t)
+		if err := os.Chmod(artifact.Path, 0o640); err != nil {
+			t.Fatal(err)
+		}
+		if err := resolve(artifact, record.State.InitialSnapshot.Identity); err == nil {
+			t.Fatal("unsafe incident mode replayed")
+		}
+		if err := os.Remove(artifact.Path); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("symlink", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink creation requires optional Windows privileges")
+		}
+		artifact := preserve(t)
+		target := filepath.Join(t.TempDir(), "payload")
+		if err := os.WriteFile(target, payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(artifact.Path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, artifact.Path); err != nil {
+			t.Fatal(err)
+		}
+		if err := resolve(artifact, record.State.InitialSnapshot.Identity); err == nil {
+			t.Fatal("symlinked incident replayed")
+		}
+		if err := os.Remove(artifact.Path); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("stale target", func(t *testing.T) {
+		artifact := preserve(t)
+		if err := resolve(artifact, "sha256:"+strings.Repeat("f", 64)); err == nil {
+			t.Fatal("stale target replayed")
+		}
+	})
+
+	t.Run("parent directory replacement", func(t *testing.T) {
+		artifact := preserve(t)
+		original := dir + ".original"
+		reviewIncidentAfterDirectoryOpen = func() {
+			if err := os.Rename(dir, original); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Cleanup(func() { reviewIncidentAfterDirectoryOpen = func() {} })
+		if err := resolve(artifact, record.State.InitialSnapshot.Identity); err == nil {
+			t.Fatal("incident replay accepted a replaced parent directory")
+		}
+	})
+}
+
+func TestResolveReviewIncidentReferenceRejectsBoundExhaustion(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		files int
+		size  int
+	}{
+		{name: "entry count", files: reviewIncidentMaxEntries, size: 1},
+		{name: "aggregate bytes", files: 2, size: reviewIncidentMaxAggregateBytes / 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo, started, _, record := newArtifactReview(t, false)
+			payload := admittedReviewerPayloadForTest(t, repo, record, record.State.SelectedLenses[0], 0)
+			dir, err := reviewtransaction.CompactIncidentsDir(context.Background(), repo, started.LineageID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := preserveIncidentArtifact(dir, started.LineageID, record.State.InitialSnapshot.Identity, record.State.SelectedLenses[0], 0, payload, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for index := 0; index < test.files; index++ {
+				path := filepath.Join(dir, fmt.Sprintf("extra-%03d.raw", index))
+				if err := os.WriteFile(path, bytes.Repeat([]byte("x"), test.size), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			artifact.Reference = reviewIncidentReference(artifact)
+			if _, err := resolveReviewIncidentReference(context.Background(), repo, artifact.Reference, started.LineageID, record.State.InitialSnapshot.Identity, record.State.SelectedLenses[0], 0); err == nil {
+				t.Fatal("over-limit incident directory replayed")
+			}
+		})
+	}
+}
+
+func TestReviewCaptureResultReadsLocalFileNamedLikeIncidentReference(t *testing.T) {
+	repo, started, _, record := newArtifactReview(t, false)
+	dir := t.TempDir()
+	name := reviewIncidentReferencePrefix + strings.Repeat("a", 64)
+	if err := os.WriteFile(filepath.Join(dir, name), admittedReviewerPayloadForTest(t, repo, record, record.State.SelectedLenses[0], 0), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := RunReviewCaptureResult([]string{
+		"--cwd", repo, "--lineage", started.LineageID, "--target", record.State.InitialSnapshot.Identity,
+		"--lens", record.State.SelectedLenses[0], "--order", "0", "--input", name,
+	}, io.Discard); err != nil {
+		t.Fatalf("capture-result did not preserve readable file semantics: %v", err)
 	}
 }
 

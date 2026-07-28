@@ -290,7 +290,7 @@ func reviewIncidentReference(artifact reviewIncidentArtifact) string {
 func resolveReviewIncidentReference(ctx context.Context, repo, reference, lineage, target, lens string, order int) ([]byte, error) {
 	if !strings.HasPrefix(reference, reviewIncidentReferencePrefix) ||
 		!validReviewCapabilitySHA256("sha256:"+strings.TrimPrefix(reference, reviewIncidentReferencePrefix)) {
-		return nil, errors.New("preserved reviewer result reference is malformed")
+		return nil, errors.New("preserved reviewer result reference is malformed; retry `gentle-ai review capture-result` with the exact reference emitted by `gentle-ai review preserve-result` for this binding")
 	}
 	dir, err := reviewtransaction.CompactIncidentsDir(ctx, repo, lineage)
 	if err != nil {
@@ -301,6 +301,7 @@ func resolveReviewIncidentReference(ctx context.Context, repo, reference, lineag
 		reviewIncidentMaxAggregateBytes, reviewIncidentAfterDirectoryOpen,
 	)
 	if err != nil {
+		// refusal:by-design world-action: replay cannot trust an unsafe private directory; the exit is restoring private ownership/mode and removing links or stopping replacement, which no gentle-ai command may perform
 		return nil, errors.New("preserved reviewer result directory is unavailable or unsafe")
 	}
 	for _, entry := range entries {
@@ -325,7 +326,7 @@ func resolveReviewIncidentReference(ctx context.Context, repo, reference, lineag
 			return payload, nil
 		}
 	}
-	return nil, errors.New("preserved reviewer result reference does not match the current lineage, target, lens, and order")
+	return nil, errors.New("preserved reviewer result reference does not match the current lineage, target, lens, and order; retry `gentle-ai review capture-result` with the exact reference emitted by `gentle-ai review preserve-result` for this binding")
 }
 
 func preserveIncidentArtifact(dir, lineage, target, lens string, order int, payload []byte, class reviewtransaction.ResultIncidentClass) (reviewIncidentArtifact, error) {

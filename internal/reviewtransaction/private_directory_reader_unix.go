@@ -44,7 +44,7 @@ func readPrivateDirectoryFiles(path string, limit int64, maxEntries int, aggrega
 		return nil, err
 	}
 	if len(entries) > maxEntries {
-		return nil, errors.New("private directory exceeds entry limit")
+		return nil, errors.New("private directory exceeds entry limit") // refusal:by-design world-action: bounded replay cannot choose audit entries to remove; the operator must archive excess files outside the private directory
 	}
 	files := make([]PrivateDirectoryFile, 0, len(entries))
 	var aggregate int64
@@ -65,7 +65,7 @@ func readPrivateDirectoryFiles(path string, limit int64, maxEntries int, aggrega
 		aggregate += info.Size()
 		if aggregate > aggregateLimit {
 			_ = file.Close()
-			return nil, errors.New("private directory exceeds aggregate byte limit")
+			return nil, errors.New("private directory exceeds aggregate byte limit") // refusal:by-design world-action: bounded replay cannot choose audit bytes to remove; the operator must archive excess files outside the private directory
 		}
 		payload, readErr := io.ReadAll(io.LimitReader(file, limit+1))
 		after, afterErr := file.Stat()
@@ -75,7 +75,7 @@ func readPrivateDirectoryFiles(path string, limit int64, maxEntries int, aggrega
 		}
 		aggregate += int64(len(payload)) - info.Size()
 		if aggregate > aggregateLimit {
-			return nil, errors.New("private directory exceeds aggregate byte limit")
+			return nil, errors.New("private directory exceeds aggregate byte limit") // refusal:by-design world-action: bounded replay cannot choose audit bytes to remove; the operator must archive excess files outside the private directory
 		}
 		files = append(files, PrivateDirectoryFile{Name: entry.Name(), Payload: payload})
 	}

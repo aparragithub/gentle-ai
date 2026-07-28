@@ -24,6 +24,7 @@ const reviewBindingSchema = "gentle-ai.sdd-review-binding/v1"
 var reviewBindingChange = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var reviewBindingLineage = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var reviewBindingHash = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+var errBindingPlanningRootNotFound = errors.New("selected OpenSpec change does not exist")
 var bindingFinalAuthorizationHook = func() {}
 
 type ReviewBindingPublicationError struct{ Cause error }
@@ -52,7 +53,7 @@ func BindApprovedReview(ctx context.Context, repo, change, lineage, expected str
 	if err != nil {
 		return ReviewBinding{}, err
 	}
-	if _, err := resolveBindingChangeRoot(ctx, root, repo, change); err != nil {
+	if _, err := bindingUsesFileBackedChange(ctx, root, repo, change); err != nil {
 		return ReviewBinding{}, err
 	}
 	if err := rejectHistoricalLegacyBinding(ctx, root, lineage); err != nil {
@@ -70,7 +71,7 @@ func BindApprovedReview(ctx context.Context, repo, change, lineage, expected str
 	status, err := runtimeStore.bindPreparedReview(ctx, BindReviewRequest{
 		ExpectedBindingRevision: expected, RequestID: requestID, LineageID: lineage,
 	}, func() (ReviewBinding, error) {
-		return prepareApprovedReviewBinding(ctx, root, repo, change, lineage)
+		return prepareApprovedRuntimeSuccessorBinding(ctx, root, repo, change, lineage)
 	})
 	if err != nil {
 		var publication *RuntimePublicationError
@@ -158,14 +159,31 @@ func prepareApprovedReviewBinding(ctx context.Context, root, workspace, change, 
 // not have such a root, so their already-approved compact authority and live
 // post-apply gate are the complete native successor provenance.
 func prepareApprovedRuntimeSuccessorBinding(ctx context.Context, root, workspace, change, lineage string) (ReviewBinding, error) {
-	matches, err := bindingChangeRoots(ctx, root, change)
+	fileBacked, err := bindingUsesFileBackedChange(ctx, root, workspace, change)
 	if err != nil {
 		return ReviewBinding{}, err
 	}
-	if len(matches) != 0 {
+	if fileBacked {
 		return prepareApprovedReviewBinding(ctx, root, workspace, change, lineage)
 	}
 	return prepareApprovedCompactBinding(ctx, root, change, lineage)
+}
+
+func bindingUsesFileBackedChange(ctx context.Context, root, workspace, change string) (bool, error) {
+	matches, err := bindingChangeRoots(ctx, root, change)
+	if err != nil {
+		return false, err
+	}
+	if len(matches) != 0 {
+		_, err = resolveBindingChangeRoot(ctx, root, workspace, change)
+		return true, err
+	}
+	if _, err = resolveBindingChangeRoot(ctx, root, workspace, change); err == nil {
+		return true, nil
+	} else if !errors.Is(err, errBindingPlanningRootNotFound) {
+		return false, err
+	}
+	return false, nil
 }
 
 func prepareApprovedCompactBinding(ctx context.Context, root, change, lineage string) (ReviewBinding, error) {
@@ -639,13 +657,13 @@ func resolveBindingChangeRoot(ctx context.Context, root, workspace, change strin
 		}
 	}
 	if planningRoot == "" {
-		return "", errors.New("selected OpenSpec change does not exist")
+		return "", errBindingPlanningRootNotFound
 	}
 	candidate := filepath.Join(planningRoot, "openspec", "changes", change)
 	info, err := os.Stat(candidate)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", errors.New("selected OpenSpec change does not exist")
+			return "", errBindingPlanningRootNotFound
 		}
 		return "", err
 	}

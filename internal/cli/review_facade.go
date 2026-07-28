@@ -1167,10 +1167,10 @@ func RunReviewBindSDD(args []string, stdout io.Writer) error {
 }
 
 func runReviewBindSDD(ctx context.Context, args []string, stdout io.Writer) error {
-	flags := newReviewFlagSet("review bind-sdd", stdout, "Bind an explicit approved compact lineage to an OpenSpec change.")
+	flags := newReviewFlagSet("review bind-sdd", stdout, "Bind an explicit approved compact lineage to an SDD change.")
 	cwd := flags.String("cwd", "", "repository path")
 	contract := flags.String("contract", "", "optional negotiated review integration contract")
-	change := flags.String("change", "", "OpenSpec change")
+	change := flags.String("change", "", "SDD change")
 	lineage := flags.String("lineage", "", "approved lineage")
 	expected := flags.String("expected-binding-revision", "", "binding revision")
 	if err := parseReviewFlags(flags, args); err != nil {

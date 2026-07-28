@@ -309,7 +309,12 @@ func RunReviewCaptureResult(args []string, stdout io.Writer) error {
 			ChangedPathManifest: append([]reviewtransaction.ChangedPathManifestEntry{}, frozen.ChangedPathManifest...),
 		})
 	}
-	rawPayload, err := readFacadeBytes(*input)
+	var rawPayload []byte
+	if reviewIncidentReferenceInput(*input) {
+		rawPayload, err = resolveReviewIncidentReference(ctx, root, *input, state.LineageID, state.InitialSnapshot.Identity, *lens, *order)
+	} else {
+		rawPayload, err = readFacadeBytes(*input)
+	}
 	if err != nil {
 		return reviewPreflightError(fmt.Errorf("read reviewer result: %w", err))
 	}
@@ -385,6 +390,15 @@ func RunReviewCaptureResult(args []string, stdout io.Writer) error {
 		artifact.Path = ""
 	}
 	return encodeReviewJSON(stdout, artifact)
+}
+
+func reviewIncidentReferenceInput(input string) bool {
+	if !strings.HasPrefix(input, reviewIncidentReferencePrefix) ||
+		!validReviewCapabilitySHA256("sha256:"+strings.TrimPrefix(input, reviewIncidentReferencePrefix)) {
+		return false
+	}
+	_, err := os.Lstat(input)
+	return os.IsNotExist(err)
 }
 
 func reviewResultReference(artifact reviewResultArtifact) string {

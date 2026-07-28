@@ -21,7 +21,11 @@ const (
 	reviewIncidentArtifactSchema     = "gentle-ai.review-incident-artifact/v1"
 	reviewIncidentArtifactCapability = "review.native_incident_artifact"
 	reviewIncidentReferencePrefix    = "rinc1_"
+	reviewIncidentMaxEntries         = 64
+	reviewIncidentMaxAggregateBytes  = 8 << 20
 )
+
+var reviewIncidentAfterDirectoryOpen = func() {}
 
 // reviewCapturePreflightResult confirms that one capture binding matches the
 // reviewing authority reachable from the resolved repository root, before a
@@ -281,6 +285,47 @@ func reviewIncidentReference(artifact reviewIncidentArtifact) string {
 	}
 	payload, _ := json.Marshal(preimage)
 	return reviewIncidentReferencePrefix + strings.TrimPrefix(facadePayloadHash(payload), "sha256:")
+}
+
+func resolveReviewIncidentReference(ctx context.Context, repo, reference, lineage, target, lens string, order int) ([]byte, error) {
+	if !strings.HasPrefix(reference, reviewIncidentReferencePrefix) ||
+		!validReviewCapabilitySHA256("sha256:"+strings.TrimPrefix(reference, reviewIncidentReferencePrefix)) {
+		return nil, errors.New("preserved reviewer result reference is malformed")
+	}
+	dir, err := reviewtransaction.CompactIncidentsDir(ctx, repo, lineage)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := reviewtransaction.ReadPrivateDirectoryFiles(
+		dir, reviewResultArtifactLimit, reviewIncidentMaxEntries,
+		reviewIncidentMaxAggregateBytes, reviewIncidentAfterDirectoryOpen,
+	)
+	if err != nil {
+		return nil, errors.New("preserved reviewer result directory is unavailable or unsafe")
+	}
+	for _, entry := range entries {
+		payload := entry.Payload
+		digest := facadePayloadHash(payload)
+		artifact := reviewIncidentArtifact{
+			Schema: reviewIncidentArtifactSchema, Capability: reviewIncidentArtifactCapability,
+			SHA256: digest, LineageID: lineage, TargetIdentity: target, Lens: lens, SelectedOrder: order,
+		}
+		if reviewIncidentReference(artifact) != reference {
+			continue
+		}
+		digest12 := strings.TrimPrefix(digest, "sha256:")[:12]
+		validName := entry.Name == fmt.Sprintf("%02d-%s-%s.raw", order, lens, digest12)
+		for _, class := range []reviewtransaction.ResultIncidentClass{
+			reviewtransaction.ResultIncidentEmptyResult,
+			reviewtransaction.ResultIncidentNestedEnvelope,
+		} {
+			validName = validName || entry.Name == fmt.Sprintf("%02d-%s-%s-%s.raw", order, lens, class, digest12)
+		}
+		if validName {
+			return payload, nil
+		}
+	}
+	return nil, errors.New("preserved reviewer result reference does not match the current lineage, target, lens, and order")
 }
 
 func preserveIncidentArtifact(dir, lineage, target, lens string, order int, payload []byte, class reviewtransaction.ResultIncidentClass) (reviewIncidentArtifact, error) {

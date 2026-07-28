@@ -220,8 +220,8 @@ func TestOpenCodeRenderedReviewProtocolCost(t *testing.T) {
 		// un-rendered protocol). The ceilings below sit ~15% above the pins so
 		// an ordinary wording fix never touches them, and 4-5x below the
 		// un-rendered sizes so a renderer regression still fails loudly.
-		{name: "standard", agents: []string{"review-reliability"}, beforeChars: 42_301, wantChars: 8_803, maxCharacters: 10_000},
-		{name: "full-4R", agents: []string{"review-risk", "review-resilience", "review-readability", "review-reliability"}, beforeChars: 106_998, wantChars: 18_007, maxCharacters: 20_500},
+		{name: "standard", agents: []string{"review-reliability"}, beforeChars: 42_301, wantChars: 8_789, maxCharacters: 10_000},
+		{name: "full-4R", agents: []string{"review-risk", "review-resilience", "review-readability", "review-reliability"}, beforeChars: 106_998, wantChars: 17_993, maxCharacters: 20_500},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
